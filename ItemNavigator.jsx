@@ -13,103 +13,94 @@ import { UOWFileDetailsDTO } from '../model/UOWFileDetailsDTO';
 export function ItemProcessingBase() {
   const location = useLocation();
   const rowData: UOWFileDetailsDTO = location?.state?.rowData;
-  const flatData: ItemRecordDTO[] = location?.state?.apiData;
+  const flatData: ItemRecordDTO[] = location?.state?.apiData ?? [];
 
-  // Derive the “...D030401_T140006...0” style header
   const formattedName = "…" +
     rowData?.name?.match(/\D\d{6}_T\d{6}/)?.[0] +
     "…" + rowData?.segmentId;
 
-  // Track which item is current
-  const [selectedIndex, setSelectedIndex] = React.useState<number>(0);
-  // Store fetched blobs on the fly
-  const [blobs, setBlobs] = React.useState<
-    { front: Blob; back: Blob }[]
-  >([]);
+  const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const [blobs, setBlobs] = React.useState<{ front: Blob; back: Blob }[]>([]);
 
   React.useEffect(() => {
-    // initialize blob array placeholders
-    if (flatData?.length > 0) {
+    // Initialize blob slots
+    if (flatData.length > 0) {
       setBlobs(flatData.map(() => ({ front: new Blob(), back: new Blob() })));
     }
   }, [flatData]);
 
-  // Fetch PNG blob for a given side
   const fetchImageData = async (side: 'Front' | 'Back', id: string) => {
     const url = `https://.../check-images/${id}/${side}/PNG`;
     const resp = await fetch(url);
     return resp.ok ? resp.blob() : new Blob();
   };
 
-  // Load images for a given index
   const loadItemImages = async (index: number) => {
     const item = flatData[index];
     if (!item) return;
-
     try {
       const [front, back] = await Promise.all([
         fetchImageData('Front', item.responseRecordDTO.id),
         fetchImageData('Back', item.responseRecordDTO.id)
       ]);
-      setBlobs(bs =>
-        bs.map((b, i) =>
-          i === index ? { front, back } : b
-        )
+      setBlobs(prev =>
+        prev.map((entry, i) => (i === index ? { front, back } : entry))
       );
-    } catch {
-      console.error(`Failed to load images for index ${index}`);
+    } catch (err) {
+      console.error(`Image load error:`, err);
     }
   };
 
-  // Handlers for prev/next
-  const goPrev = () => {
-    const prev = (selectedIndex - 1 + flatData.length) % flatData.length;
-    setSelectedIndex(prev);
-    loadItemImages(prev);
-  };
-  const goNext = () => {
-    const next = (selectedIndex + 1) % flatData.length;
-    setSelectedIndex(next);
-    loadItemImages(next);
+  const goToIndex = (index: number) => {
+    if (index >= 0 && index < flatData.length) {
+      setSelectedIndex(index);
+      loadItemImages(index);
+    }
   };
 
-  // On mount, load first item
+  const goPrev = () => goToIndex(selectedIndex - 1);
+  const goNext = () => goToIndex(selectedIndex + 1);
+
+  // Load first item
   React.useEffect(() => {
     if (flatData.length) {
       loadItemImages(0);
     }
   }, [flatData]);
 
-  if (!flatData?.length) {
-    return <div>No items to display</div>;
-  }
+  // Enable keyboard navigation
+  React.useEffect(() => {
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' && selectedIndex > 0) goPrev();
+      if (e.key === 'ArrowRight' && selectedIndex < flatData.length - 1) goNext();
+    };
+    window.addEventListener('keydown', keyHandler);
+    return () => window.removeEventListener('keydown', keyHandler);
+  }, [selectedIndex, flatData]);
+
+  if (!flatData.length) return <div>No items available.</div>;
 
   const current = flatData[selectedIndex];
   const currentBlobs = blobs[selectedIndex] || { front: new Blob(), back: new Blob() };
 
   return (
     <ThemeProvider baseTheme="common">
-      <div className="item-panel" style={{ padding: 16, width: 600 }}>
-        {/* Header */}
+      <div style={{ padding: 16, width: 600 }}>
         <h2>{formattedName || 'Untitled'}</h2>
 
-        {/* Sequence numbers */}
-        <div
-          className="sequence-list"
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: 24,
-            margin: '16px 0'
-          }}
-        >
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 20,
+          marginBottom: 16
+        }}>
           {flatData.map((item, idx) => (
             <span
               key={item.id}
               style={{
-                fontSize: 18,
                 fontWeight: idx === selectedIndex ? 'bold' : 'normal',
-                opacity: idx === selectedIndex ? 1 : 0.6
+                opacity: idx === selectedIndex ? 1 : 0.6,
+                fontSize: 18
               }}
             >
               {item.sequenceNumber}
@@ -117,7 +108,6 @@ export function ItemProcessingBase() {
           ))}
         </div>
 
-        {/* Image viewer */}
         <CheckImage
           key={`viewer-${current.id}`}
           item={{
@@ -127,21 +117,18 @@ export function ItemProcessingBase() {
           }}
         />
 
-        {/* Pagination controls */}
-        <div
-          className="navigator"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginTop: 16
-          }}
-        >
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          marginTop: 20
+        }}>
           <Button
             size="large"
             kind="standard"
+            disabled={selectedIndex === 0}
             spacing={{ l: 1, r: 1 }}
-            centerIcon={<IconPanelPrev size="small" aria-hidden="true" />}
+            centerIcon={<IconPanelPrev size="small" />}
             onClick={goPrev}
             aria-label="Previous item"
           />
@@ -151,8 +138,9 @@ export function ItemProcessingBase() {
           <Button
             size="large"
             kind="standard"
+            disabled={selectedIndex === flatData.length - 1}
             spacing={{ l: 1, r: 1 }}
-            centerIcon={<IconPanelNext size="small" aria-hidden="true" />}
+            centerIcon={<IconPanelNext size="small" />}
             onClick={goNext}
             aria-label="Next item"
           />
