@@ -1,155 +1,124 @@
 import * as React from 'react';
 import { useLocation } from 'react-router-dom';
+import { IconPanelNext, IconPanelPrev } from "@wf-wfria/pioneer-core";
+import { Button } from "@wf-wfria/pioneer-core";
+import { ItemNavigator } from "@wf-wfria/pioneer-core";
 import {
-  Button,
-  IconPanelNext,
-  IconPanelPrev,
-  ThemeProvider
+    DisclosureList,
+    DisclosureListContainer,
+    DisclosureListItem,
+    ThemeProvider
 } from "@wf-wfria/pioneer-core";
-import CheckImage from './check-image/check-image';
 import { ItemRecordDTO } from '../model/ItemRecordDTO';
 import { UOWFileDetailsDTO } from '../model/UOWFileDetailsDTO';
+import CheckImage from './check-image/check-image';
 
 export function ItemProcessingBase() {
-  const location = useLocation();
-  const rowData: UOWFileDetailsDTO = location?.state?.rowData;
-  const flatData: ItemRecordDTO[] = location?.state?.apiData ?? [];
+    const location = useLocation();
+    const rowData: UOWFileDetailsDTO = location?.state?.rowData;
+    const flatData: ItemRecordDTO[] = location?.state?.apiData;
+    const formattedName = "..." + rowData?.name?.match(/\D\d{6}_T\d{6}/)?.[0] + "..." + rowData?.segmentId;
 
-  const formattedName = "…" +
-    rowData?.name?.match(/\D\d{6}_T\d{6}/)?.[0] +
-    "…" + rowData?.segmentId;
+    const [selectedIndex, setSelectedIndex] = React.useState<number>(0);
+    const [renderedContent, setRenderedContent] = React.useState<any>("Loading...");
 
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
-  const [blobs, setBlobs] = React.useState<{ front: Blob; back: Blob }[]>([]);
-
-  React.useEffect(() => {
-    // Initialize blob slots
-    if (flatData.length > 0) {
-      setBlobs(flatData.map(() => ({ front: new Blob(), back: new Blob() })));
-    }
-  }, [flatData]);
-
-  const fetchImageData = async (side: 'Front' | 'Back', id: string) => {
-    const url = `https://.../check-images/${id}/${side}/PNG`;
-    const resp = await fetch(url);
-    return resp.ok ? resp.blob() : new Blob();
-  };
-
-  const loadItemImages = async (index: number) => {
-    const item = flatData[index];
-    if (!item) return;
-    try {
-      const [front, back] = await Promise.all([
-        fetchImageData('Front', item.responseRecordDTO.id),
-        fetchImageData('Back', item.responseRecordDTO.id)
-      ]);
-      setBlobs(prev =>
-        prev.map((entry, i) => (i === index ? { front, back } : entry))
-      );
-    } catch (err) {
-      console.error(`Image load error:`, err);
-    }
-  };
-
-  const goToIndex = (index: number) => {
-    if (index >= 0 && index < flatData.length) {
-      setSelectedIndex(index);
-      loadItemImages(index);
-    }
-  };
-
-  const goPrev = () => goToIndex(selectedIndex - 1);
-  const goNext = () => goToIndex(selectedIndex + 1);
-
-  // Load first item
-  React.useEffect(() => {
-    if (flatData.length) {
-      loadItemImages(0);
-    }
-  }, [flatData]);
-
-  // Enable keyboard navigation
-  React.useEffect(() => {
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' && selectedIndex > 0) goPrev();
-      if (e.key === 'ArrowRight' && selectedIndex < flatData.length - 1) goNext();
+    const fetchImageData = async (imageSide: string, id: string): Promise<Blob | undefined> => {
+        try {
+            const url = `https://chimg-image-service-aks-sbox.cluster002.aks-scus-s.k8s.wellsfargo.net/api/v2/check-images/${id}/${imageSide}/PNG`;
+            const response = await fetch(url);
+            if (response.ok) {
+                return await response.blob();
+            }
+        } catch (error) {
+            console.error("Image fetch error", error);
+        }
     };
-    window.addEventListener('keydown', keyHandler);
-    return () => window.removeEventListener('keydown', keyHandler);
-  }, [selectedIndex, flatData]);
 
-  if (!flatData.length) return <div>No items available.</div>;
+    const loadImage = async (index: number) => {
+        if (index < 0 || index >= flatData.length) return;
+        const item = flatData[index];
+        const frontBlob = await fetchImageData("Front", item.responseRecordDTO.id);
+        const backBlob = await fetchImageData("Back", item.responseRecordDTO.id);
+        item.frontImg = frontBlob ?? new Blob();
+        item.backImg = backBlob ?? new Blob();
+        setRenderedContent(<CheckImage key={`item-${item.id}`} item={item} />);
+    };
 
-  const current = flatData[selectedIndex];
-  const currentBlobs = blobs[selectedIndex] || { front: new Blob(), back: new Blob() };
+    React.useEffect(() => {
+        if (flatData?.length > 0) {
+            loadImage(selectedIndex);
+        }
+    }, [selectedIndex]);
 
-  return (
-    <ThemeProvider baseTheme="common">
-      <div style={{ padding: 16, width: 600 }}>
-        <h2>{formattedName || 'Untitled'}</h2>
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                setSelectedIndex((prev) => Math.min(prev + 1, flatData.length - 1));
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                setSelectedIndex((prev) => Math.max(prev - 1, 0));
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [flatData]);
 
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: 20,
-          marginBottom: 16
-        }}>
-          {flatData.map((item, idx) => (
-            <span
-              key={item.id}
-              style={{
-                fontWeight: idx === selectedIndex ? 'bold' : 'normal',
-                opacity: idx === selectedIndex ? 1 : 0.6,
-                fontSize: 18
-              }}
-            >
-              {item.sequenceNumber}
-            </span>
-          ))}
-        </div>
-
-        <CheckImage
-          key={`viewer-${current.id}`}
-          item={{
-            ...current,
-            frontImg: currentBlobs.front,
-            backImg: currentBlobs.back
-          }}
-        />
-
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginTop: 20
-        }}>
-          <Button
-            size="large"
-            kind="standard"
-            disabled={selectedIndex === 0}
-            spacing={{ l: 1, r: 1 }}
-            centerIcon={<IconPanelPrev size="small" />}
-            onClick={goPrev}
-            aria-label="Previous item"
-          />
-          <span style={{ margin: '0 12px' }}>
-            {selectedIndex + 1} of {flatData.length} items
-          </span>
-          <Button
-            size="large"
-            kind="standard"
-            disabled={selectedIndex === flatData.length - 1}
-            spacing={{ l: 1, r: 1 }}
-            centerIcon={<IconPanelNext size="small" />}
-            onClick={goNext}
-            aria-label="Next item"
-          />
-        </div>
-      </div>
-    </ThemeProvider>
-  );
+    return (
+        <ThemeProvider baseTheme="common">
+            <div style={{ display: "flex" }}>
+                <div
+                    style={{ width: "5%", background: "#eee", cursor: "pointer" }}
+                    onMouseEnter={() => setSelectedIndex((prev) => Math.max(prev - 1, 0))}
+                />
+                <DisclosureListContainer
+                    spacing={{ top: 0, right: 0, bottom: 0, left: 0 }}
+                    header={rowData?.name?.split('.')[0] || 'Default Title'}
+                    height="760px"
+                >
+                    <DisclosureList
+                        defaultSelectedIndex={0}
+                        defaultExpanded
+                        title={formattedName || 'Default Title'}
+                        footer={
+                            <ItemNavigator
+                                totalItems={flatData.length}
+                                currentIndex={selectedIndex}
+                                prevTrigger={
+                                    <Button
+                                        size="large"
+                                        kind="standard"
+                                        onClick={() => setSelectedIndex((prev) => Math.max(prev - 1, 0))}
+                                        centerIcon={<IconPanelPrev size="small" />}
+                                    />
+                                }
+                                nextTrigger={
+                                    <Button
+                                        size="large"
+                                        kind="standard"
+                                        onClick={() => setSelectedIndex((prev) => Math.min(prev + 1, flatData.length - 1))}
+                                        centerIcon={<IconPanelNext size="small" />}
+                                    />
+                                }
+                            />
+                        }
+                    >
+                        {(flatData || []).map((item, index) => (
+                            <DisclosureListItem
+                                key={item.id}
+                                id={item.id}
+                                index={index}
+                                itemId={item.id}
+                                label={item.sequenceNumber || 'Default Label'}
+                                aria-label={`item-viewer-container-${item.id}`}
+                            />
+                        ))}
+                    </DisclosureList>
+                </DisclosureListContainer>
+                <div style={{ flexGrow: 1, marginLeft: "10px" }}>{renderedContent}</div>
+            </div>
+        </ThemeProvider>
+    );
 }
 
 export default function ItemProcessing() {
-  return <ItemProcessingBase />;
+    return <ItemProcessingBase />;
 }
